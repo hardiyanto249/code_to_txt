@@ -1,0 +1,5 @@
+{
+  "name": "Code to TXT Exporter",
+  "description": "Sebuah aplikasi untuk memilih folder kode dan mengekspor seluruh isinya, termasuk struktur file, ke dalam satu file TXT yang terformat dengan baik.",
+  "requestFramePermissions": []
+}
