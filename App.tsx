@@ -1,10 +1,21 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { ProcessedFile } from './types';
 import { generateTxt } from './services/txtService';
 import { FolderIcon, DocumentArrowDownIcon, SpinnerIcon } from './components/Icons';
 
+// Helper function to convert a wildcard pattern to a regex
+const wildcardToRegex = (pattern: string) => {
+  // Escape regex special characters, then replace wildcard '*' with '.*'
+  const escapedPattern = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  const regexPattern = escapedPattern.replace(/\*/g, '.*');
+  return new RegExp(`^${regexPattern}$`);
+};
+
 const App: React.FC = () => {
   const [files, setFiles] = useState<File[] | null>(null);
+  const [filteredFiles, setFilteredFiles] = useState<File[]>([]);
+  const [includeFilter, setIncludeFilter] = useState<string>('');
+  const [excludeFilter, setExcludeFilter] = useState<string>('node_modules, .git, dist, build, .vscode, .idea');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -17,9 +28,47 @@ const App: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!files) {
+      setFilteredFiles([]);
+      return;
+    }
+
+    const excludeFolderPatterns = excludeFilter.split(',').map(p => p.trim()).filter(Boolean);
+    const includeFilePatterns = includeFilter.split(',').map(p => p.trim()).filter(Boolean);
+
+    const newFilteredFiles = files.filter(file => {
+      const path = (file as any).webkitRelativePath || file.name;
+
+      // Check against exclude folder patterns
+      for (const pattern of excludeFolderPatterns) {
+        if (path.includes(`/${pattern}/`) || path.startsWith(`${pattern}/`)) {
+          return false;
+        }
+      }
+
+      // Check against include file patterns
+      if (includeFilePatterns.length > 0) {
+        const fileName = file.name;
+        const isIncluded = includeFilePatterns.some(pattern => {
+          const regex = wildcardToRegex(pattern);
+          return regex.test(fileName);
+        });
+        if (!isIncluded) {
+          return false;
+        }
+      }
+
+      return true; // Include the file if it passes all checks
+    });
+
+    setFilteredFiles(newFilteredFiles);
+
+  }, [files, includeFilter, excludeFilter]);
+
   const handleGenerate = useCallback(async () => {
-    if (!files || files.length === 0) {
-      setError("Tidak ada file yang dipilih. Silakan pilih folder terlebih dahulu.");
+    if (!filteredFiles || filteredFiles.length === 0) {
+      setError("Tidak ada file yang cocok dengan filter Anda untuk diekspor.");
       return;
     }
 
@@ -28,7 +77,7 @@ const App: React.FC = () => {
 
     try {
       const fileContents = await Promise.all(
-        files.map(file => {
+        filteredFiles.map(file => {
           return new Promise<ProcessedFile>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
@@ -68,7 +117,7 @@ const App: React.FC = () => {
     } finally {
       setIsProcessing(false);
     }
-  }, [files]);
+  }, [filteredFiles]);
   
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-900 font-sans">
@@ -100,15 +149,50 @@ const App: React.FC = () => {
           {error && <p className="text-red-400 text-center mt-4">{error}</p>}
 
           {files && files.length > 0 && (
+            <div className="mt-6 space-y-4">
+              <div>
+                <label htmlFor="include-filter" className="block text-sm font-medium text-slate-300 mb-1">
+                  Sertakan File (dipisahkan koma)
+                </label>
+                <input
+                  id="include-filter"
+                  type="text"
+                  value={includeFilter}
+                  onChange={(e) => setIncludeFilter(e.target.value)}
+                  placeholder="*.js, *.css, package.json"
+                  className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  aria-describedby="include-helper"
+                />
+                <p id="include-helper" className="text-xs text-slate-500 mt-1">Gunakan `*` sebagai wildcard. Biarkan kosong untuk menyertakan semua file.</p>
+              </div>
+              <div>
+                <label htmlFor="exclude-filter" className="block text-sm font-medium text-slate-300 mb-1">
+                  Kecualikan Folder (dipisahkan koma)
+                </label>
+                <input
+                  id="exclude-filter"
+                  type="text"
+                  value={excludeFilter}
+                  onChange={(e) => setExcludeFilter(e.target.value)}
+                  placeholder="node_modules, .git, dist"
+                  className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  aria-describedby="exclude-helper"
+                />
+                <p id="exclude-helper" className="text-xs text-slate-500 mt-1">Folder yang cocok dengan nama-nama ini akan dilewati.</p>
+              </div>
+            </div>
+          )}
+
+          {files && files.length > 0 && (
             <div className="mt-6 text-center bg-slate-700/50 p-4 rounded-lg">
-              <p className="text-green-400 font-medium">{files.length} file ditemukan dan siap untuk diekspor.</p>
+              <p className="text-green-400 font-medium">{filteredFiles.length} dari {files.length} file akan diekspor.</p>
             </div>
           )}
 
           <div className="mt-8">
             <button
               onClick={handleGenerate}
-              disabled={!files || files.length === 0 || isProcessing}
+              disabled={!filteredFiles || filteredFiles.length === 0 || isProcessing}
               className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg hover:bg-green-500 disabled:bg-slate-600 disabled:cursor-not-allowed disabled:text-slate-400 transition-all duration-200 transform hover:scale-105 disabled:scale-100"
             >
               {isProcessing ? (
